@@ -36,7 +36,7 @@
 | `ESP32-Competition_Deliverables/` | ESP32 WiFi 遥测网关 | Arduino / FreeRTOS |
 | `Drone_Tracking_WebCloud/` | 云端监控看板 | Python / FastAPI / SQLite |
 | `Key-document/` | 核心设计文档（已验证与代码同步） | Markdown |
-| `References/` | 硬件参考资料、数据集 | — |
+| `openmv-code/` | OpenMV 磁盘部署文件（模型 + 标签 + 脚本） | MicroPython / TFLite |
 
 ---
 
@@ -116,6 +116,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | [Key-document/参数速查表.md](Key-document/参数速查表.md) | 所有关键常量集中索引（含源码行号） | ✅ 新增 |
 | [Key-document/已知问题与陷阱.md](Key-document/已知问题与陷阱.md) | 经审计确认的设计缺陷和调试经验 | ✅ 新增 |
 | [Key-document/串口联调测试清单.md](Key-document/串口联调测试清单.md) | Hex 测试帧、联调步骤、故障排查 | ✅ v3.0 |
+| [Key-document/参考资料下载链接.md](Key-document/参考资料下载链接.md) | 各模块官方文档、工具下载地址 | ✅ 新增 |
 | [Key-document/目录结构说明.md](Key-document/目录结构说明.md) | 每个文件夹存放了什么、开发者去哪找代码 | ✅ 新增 |
 
 ---
