@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAV Tracking — 管理后台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family:'Inter','Segoe UI','Microsoft YaHei',sans-serif; background:#F9FAFB; margin:0; }
+    .card { background:#fff; border-radius:16px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    .btn-primary { background:#2563EB; color:#fff; border-radius:12px; font-weight:600; font-size:13px; padding:10px 0; width:100%; transition:all .15s; }
+    .btn-primary:hover { background:#1d4ed8; }
+    .btn-primary:disabled { opacity:.5; cursor:wait; }
+    .input-box { width:100%; padding:10px 14px; background:#F3F4F6; border-radius:12px; border:none; outline:none; font-size:13px; color:#111827; transition:all .15s; }
+    .input-box:focus { box-shadow:0 0 0 3px rgba(37,99,235,0.15); }
+    .input-box::placeholder { color:#9CA3AF; }
+    .tag { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:9999px; font-size:11px; font-weight:500; }
+    .tree-cam { display:flex; align-items:center; gap:8px; padding:6px 12px; background:#F9FAFB; border-radius:10px; cursor:pointer; transition:all .12s; }
+    .tree-cam:hover { background:#EFF6FF; }
+  </style>
+</head>
+
+<body class="min-h-screen">
+<div id="app">
+
+  <!-- ═══════════ 顶部导航 ═══════════ -->
+  <header class="bg-white h-14 flex items-center justify-between px-6" style="box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-[#2563EB] flex items-center justify-center">
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <span class="text-[#111827] font-bold tracking-wide text-sm">管理后台 · 强管控版</span>
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <a href="dashboard.html" class="text-[#2563EB] hover:text-blue-700 transition-colors font-medium text-xs">返回大屏</a>
+      <button @click="logout" class="text-gray-400 hover:text-red-500 transition-colors text-xs">退出</button>
+    </div>
+  </header>
+
+  <!-- ═══════════ 主内容 ═══════════ -->
+  <div class="max-w-6xl mx-auto py-6 px-4 space-y-6">
+
+    <!-- ── 反馈消息 ── -->
+    <div v-if="toast" :class="['fixed top-16 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg transition-all',
+      toastOk ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200']">
+      {{ toast }}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- ═══ 卡片1: 地点管理 ═══ -->
+      <div class="card">
+        <h2 class="text-base font-bold text-[#111827] mb-5 flex items-center gap-2">
+          <svg class="w-4 h-4 text-[#2563EB]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          地点管理
+        </h2>
+
+        <div class="space-y-3 mb-5">
+          <input v-model="locForm.name" class="input-box" placeholder="地点名称" />
+          <input v-model="locForm.desc" class="input-box" placeholder="描述（可选）" />
+          <button @click="createLocation" class="btn-primary">新增地点</button>
+        </div>
+
+        <div class="space-y-2">
+          <div v-for="loc in locations" :key="loc.id"
+            class="flex items-center justify-between px-3 py-2.5 bg-[#F9FAFB] rounded-xl">
+            <div>
+              <div class="text-sm font-medium text-[#111827]">{{ loc.name }}</div>
+              <div class="text-[10px] text-gray-400">{{ loc.description || '无描述' }}</div>
+            </div>
+            <button @click="deleteLocation(loc)" class="text-xs text-gray-400 hover:text-red-500 transition-colors">删除</button>
+          </div>
+          <div v-if="locations.length===0" class="text-xs text-gray-400 text-center py-4">暂无地点</div>
+        </div>
+      </div>
+
+      <!-- ═══ 卡片2: 摄像头管理 ═══ -->
+      <div class="card">
+        <h2 class="text-base font-bold text-[#111827] mb-5 flex items-center gap-2">
+          <svg class="w-4 h-4 text-[#2563EB]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          摄像头管理
+        </h2>
+
+        <div class="space-y-3 mb-5">
+          <select v-model="camForm.location_id" class="input-box">
+            <option value="">选择所属地点...</option>
+            <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.name }}</option>
+          </select>
+          <input v-model="camForm.name" class="input-box" placeholder="摄像头 ID (如 CAM_EAST_04)" />
+          <button @click="createCamera" class="btn-primary">注册摄像头</button>
+        </div>
+
+        <div class="space-y-2">
+          <div v-for="cam in cameras" :key="cam.id"
+            class="flex items-center justify-between px-3 py-2.5 bg-[#F9FAFB] rounded-xl">
+            <div>
+              <div class="text-sm font-medium text-[#111827]">{{ cam.camera_name }}</div>
+              <div class="text-[10px] text-gray-400">{{ cam.location_name }} · {{ cam.status }}</div>
+            </div>
+            <button @click="deleteCamera(cam)" class="text-xs text-gray-400 hover:text-red-500 transition-colors">删除</button>
+          </div>
+          <div v-if="cameras.length===0" class="text-xs text-gray-400 text-center py-4">暂无摄像头</div>
+        </div>
+      </div>
+
+      <!-- ═══ 卡片3: 用户与权限管理 ═══ -->
+      <div class="card">
+        <h2 class="text-base font-bold text-[#111827] mb-5 flex items-center gap-2">
+          <svg class="w-4 h-4 text-[#2563EB]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m3 5.197V21"/></svg>
+          用户管理
+        </h2>
+
+        <div class="space-y-3 mb-2">
+          <input v-model="userForm.username" class="input-box" placeholder="用户名" />
+          <input v-model="userForm.password" type="password" class="input-box" placeholder="密码（≥6位）" />
+          <select v-model="userForm.role" class="input-box">
+            <option value="user">普通用户</option>
+            <option value="admin">管理员</option>
+          </select>
+        </div>
+
+        <!-- 摄像头权限树 (仅普通用户) -->
+        <div v-if="userForm.role==='user'" class="mb-4">
+          <label class="block text-xs font-medium text-gray-500 mb-2">摄像头权限</label>
+          <div class="max-h-48 overflow-y-auto space-y-3 bg-[#F3F4F6] rounded-xl p-3">
+            <div v-for="loc in assetTree" :key="loc.id">
+              <div class="flex items-center gap-2 mb-1.5">
+                <input type="checkbox" :checked="isLocFullySelected(loc)" @change="toggleLocationCams(loc)"
+                  class="w-3.5 h-3.5 rounded text-[#2563EB] border-gray-300" :indeterminate="isLocPartiallySelected(loc)" />
+                <span class="text-xs font-semibold text-[#111827]">{{ loc.name }}</span>
+                <span class="tag bg-blue-50 text-[#2563EB]">{{ loc.cameras.length }}</span>
+              </div>
+              <div class="ml-5 space-y-1">
+                <label v-for="cam in loc.cameras" :key="cam.id" class="tree-cam">
+                  <input type="checkbox" :value="cam.camera_name" v-model="userForm.selectedCameras"
+                    class="w-3.5 h-3.5 rounded text-[#2563EB] border-gray-300" />
+                  <span class="text-xs text-gray-600">{{ cam.camera_name }}</span>
+                </label>
+              </div>
+            </div>
+            <div v-if="assetTree.length===0" class="text-xs text-gray-400 text-center py-2">请先创建地点和摄像头</div>
+          </div>
+        </div>
+
+        <button @click="createUser" class="btn-primary mb-5">创建用户</button>
+
+        <!-- 用户列表 -->
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-gray-500">已有用户</span>
+          <button @click="loadUsers" class="text-[10px] text-[#2563EB] hover:text-blue-700 font-medium">刷新</button>
+        </div>
+        <div class="space-y-2">
+          <div v-for="u in users" :key="u.id"
+            class="flex items-center justify-between px-3 py-2.5 bg-[#F9FAFB] rounded-xl">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-[#111827] truncate">{{ u.username }}</span>
+                <span :class="['tag', u.role==='admin'?'bg-blue-50 text-[#2563EB]':'bg-gray-100 text-gray-500']">
+                  {{ u.role==='admin' ? '管理员' : '用户' }}
+                </span>
+              </div>
+              <div class="text-[10px] text-gray-400 mt-0.5 truncate">
+                <template v-if="u.role==='admin'">全部权限</template>
+                <template v-else-if="u.allowed_cameras.length===0"><span class="text-amber-500">未分配</span></template>
+                <template v-else>{{ u.allowed_cameras.join(', ') }}</template>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0" v-if="u.username!=='admin'">
+              <button v-if="u.role==='user'" @click="startEditPerms(u)" class="text-[10px] text-[#2563EB] hover:text-blue-700 font-medium">编辑</button>
+              <button @click="deleteUser(u.username)" class="text-[10px] text-gray-400 hover:text-red-500">删除</button>
+            </div>
+          </div>
+          <div v-if="users.length===0" class="text-xs text-gray-400 text-center py-4">暂无用户</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════ 编辑权限弹窗 ═══════════ -->
+  <div v-if="editingUser" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="editingUser=null">
+    <div class="bg-white rounded-2xl p-6 w-[420px] shadow-xl max-h-[80vh] flex flex-col">
+      <h3 class="text-base font-bold text-[#111827] mb-1">编辑摄像头权限</h3>
+      <p class="text-xs text-gray-400 mb-4">用户：{{ editingUser.username }}</p>
+
+      <div class="flex-1 overflow-y-auto space-y-3 mb-4">
+        <div v-for="loc in assetTree" :key="loc.id">
+          <div class="flex items-center gap-2 mb-1.5">
+            <input type="checkbox" :checked="isEditLocFull(loc)" @change="toggleEditLocCams(loc)"
+              class="w-3.5 h-3.5 rounded text-[#2563EB] border-gray-300" :indeterminate="isEditLocPartial(loc)" />
+            <span class="text-xs font-semibold text-[#111827]">{{ loc.name }}</span>
+          </div>
+          <div class="ml-5 space-y-1">
+            <label v-for="cam in loc.cameras" :key="cam.id" class="tree-cam">
+              <input type="checkbox" :value="cam.camera_name" v-model="editCameras"
+                class="w-3.5 h-3.5 rounded text-[#2563EB] border-gray-300" />
+              <span class="text-xs text-gray-600">{{ cam.camera_name }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex gap-3 flex-shrink-0">
+        <button @click="editingUser=null" class="flex-1 py-2.5 bg-[#F3F4F6] text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-200">取消</button>
+        <button @click="savePerms" class="flex-1 py-2.5 bg-[#2563EB] text-white rounded-xl text-sm font-medium hover:bg-[#1d4ed8]">保存</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+const TOKEN = localStorage.getItem('token');
+if (!TOKEN) window.location.href = 'login.html';
+const H = { headers: { Authorization: `Bearer ${TOKEN}` } };
+
+const { createApp, ref, reactive, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const toast = ref(''); const toastOk = ref(true);
+    function flash(msg, ok=true) { toast.value=msg; toastOk.value=ok; setTimeout(()=>toast.value='',3000); }
+
+    // ── Data ──
+    const locations = ref([]);
+    const cameras = ref([]);
+    const users = ref([]);
+    const assetTree = ref([]);
+
+    const locForm = reactive({ name:'', desc:'' });
+    const camForm = reactive({ location_id:'', name:'' });
+    const userForm = reactive({ username:'', password:'', role:'user', selectedCameras:[] });
+
+    const editingUser = ref(null);
+    const editCameras = ref([]);
+
+    // ── Load ──
+    async function loadLocations() {
+      try { locations.value = (await axios.get(`${API}/api/admin/locations`, H)).data; } catch(e) { handleErr(e); }
+    }
+    async function loadCameras() {
+      try { cameras.value = (await axios.get(`${API}/api/admin/cameras`, H)).data; } catch(e) { handleErr(e); }
+    }
+    async function loadUsers() {
+      try { users.value = (await axios.get(`${API}/api/admin/users`, H)).data; } catch(e) { handleErr(e); }
+    }
+    async function loadAssetTree() {
+      try { assetTree.value = (await axios.get(`${API}/api/asset-tree`)).data; } catch(e) { assetTree.value=[]; }
+    }
+    function loadAll() { loadLocations(); loadCameras(); loadUsers(); loadAssetTree(); }
+
+    function handleErr(e) {
+      if (e.response && (e.response.status===401||e.response.status===403)) {
+        flash('权限不足或 Token 失效',false);
+        setTimeout(()=>window.location.href='login.html',1500);
+      }
+    }
+
+    // ── Location CRUD ──
+    async function createLocation() {
+      if (!locForm.name) { flash('请填写地点名称',false); return; }
+      try {
+        const r = await axios.post(`${API}/api/admin/locations`, { name:locForm.name, description:locForm.desc }, H);
+        flash(r.data.message); locForm.name=''; locForm.desc=''; loadAll();
+      } catch(e) { flash(e.response?.data?.detail||'创建失败',false); }
+    }
+    async function deleteLocation(loc) {
+      if (!confirm(`删除地点 "${loc.name}" 及其全部摄像头？`)) return;
+      try { await axios.delete(`${API}/api/admin/locations/${loc.id}`, H); flash('已删除'); loadAll(); }
+      catch(e) { flash(e.response?.data?.detail||'删除失败',false); }
+    }
+
+    // ── Camera CRUD ──
+    async function createCamera() {
+      if (!camForm.location_id || !camForm.name) { flash('请选择地点并填写摄像头名称',false); return; }
+      try {
+        const r = await axios.post(`${API}/api/admin/cameras`, { camera_name:camForm.name, location_id:Number(camForm.location_id) }, H);
+        flash(r.data.message); camForm.name=''; loadAll();
+      } catch(e) { flash(e.response?.data?.detail||'创建失败',false); }
+    }
+    async function deleteCamera(cam) {
+      if (!confirm(`删除摄像头 "${cam.camera_name}"？`)) return;
+      try { await axios.delete(`${API}/api/admin/cameras/${cam.id}`, H); flash('已删除'); loadAll(); }
+      catch(e) { flash(e.response?.data?.detail||'删除失败',false); }
+    }
+
+    // ── User CRUD ──
+    async function createUser() {
+      if (!userForm.username || !userForm.password) { flash('请填写完整信息',false); return; }
+      if (userForm.password.length < 6) { flash('密码至少 6 位',false); return; }
+      try {
+        const payload = {
+          username: userForm.username, password: userForm.password, role: userForm.role,
+          allowed_cameras: userForm.role==='admin' ? [] : userForm.selectedCameras,
+        };
+        const r = await axios.post(`${API}/api/admin/users`, payload, H);
+        flash(r.data.message); userForm.username=''; userForm.password=''; userForm.role='user'; userForm.selectedCameras=[]; loadUsers();
+      } catch(e) { flash(e.response?.data?.detail||'创建失败',false); }
+    }
+    async function deleteUser(username) {
+      if (!confirm(`删除用户 "${username}"？`)) return;
+      try { await axios.delete(`${API}/api/admin/users/${encodeURIComponent(username)}`, H); flash('已删除'); loadUsers(); }
+      catch(e) { flash(e.response?.data?.detail||'删除失败',false); }
+    }
+
+    // ── Tree checkbox helpers (create user) ──
+    function isLocFullySelected(loc) {
+      return loc.cameras.length>0 && loc.cameras.every(c => userForm.selectedCameras.includes(c.camera_name));
+    }
+    function isLocPartiallySelected(loc) {
+      const sel = loc.cameras.filter(c => userForm.selectedCameras.includes(c.camera_name));
+      return sel.length > 0 && sel.length < loc.cameras.length;
+    }
+    function toggleLocationCams(loc) {
+      if (isLocFullySelected(loc)) {
+        loc.cameras.forEach(c => { const i = userForm.selectedCameras.indexOf(c.camera_name); if(i>=0) userForm.selectedCameras.splice(i,1); });
+      } else {
+        loc.cameras.forEach(c => { if(!userForm.selectedCameras.includes(c.camera_name)) userForm.selectedCameras.push(c.camera_name); });
+      }
+    }
+
+    // ── Edit perms modal ──
+    function startEditPerms(u) { editingUser.value=u; editCameras.value=[...u.allowed_cameras]; }
+    function isEditLocFull(loc) { return loc.cameras.length>0 && loc.cameras.every(c => editCameras.value.includes(c.camera_name)); }
+    function isEditLocPartial(loc) { const s=loc.cameras.filter(c=>editCameras.value.includes(c.camera_name)); return s.length>0&&s.length<loc.cameras.length; }
+    function toggleEditLocCams(loc) {
+      if (isEditLocFull(loc)) { loc.cameras.forEach(c => { const i=editCameras.value.indexOf(c.camera_name); if(i>=0) editCameras.value.splice(i,1); }); }
+      else { loc.cameras.forEach(c => { if(!editCameras.value.includes(c.camera_name)) editCameras.value.push(c.camera_name); }); }
+    }
+    async function savePerms() {
+      try {
+        await axios.put(`${API}/api/admin/users/cameras`, { username:editingUser.value.username, allowed_cameras:editCameras.value }, H);
+        flash('权限已更新'); editingUser.value=null; loadUsers();
+      } catch(e) { flash(e.response?.data?.detail||'更新失败',false); }
+    }
+
+    function logout() {
+      ['token','role','username','allowed_cameras'].forEach(k=>localStorage.removeItem(k));
+      window.location.href='login.html';
+    }
+
+    onMounted(loadAll);
+
+    return {
+      toast,toastOk,
+      locations,cameras,users,assetTree,
+      locForm,camForm,userForm,
+      createLocation,deleteLocation,
+      createCamera,deleteCamera,
+      createUser,deleteUser,loadUsers,
+      isLocFullySelected,isLocPartiallySelected,toggleLocationCams,
+      editingUser,editCameras,startEditPerms,
+      isEditLocFull,isEditLocPartial,toggleEditLocCams,savePerms,
+      logout,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAV Tracking — 实时监控大屏</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts-gl@2/dist/echarts-gl.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack-extra.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack-all.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    *, *::before, *::after { box-sizing:border-box; }
+    html, body { margin:0; padding:0; background:#F3F4F6; color:#111827;
+      font-family:'Inter','Segoe UI','Microsoft YaHei',sans-serif;
+      overflow-x:hidden; overflow-y:auto; min-height:100vh; width:100vw; }
+
+    /* ═══ GridStack ═══ */
+    .grid-stack { min-height:100% !important; }
+    .grid-stack-placeholder > .placeholder-content {
+      border:2px dashed #d1d5db !important; border-radius:12px;
+      background:rgba(37,99,235,0.04) !important; }
+
+    /*
+     * CRITICAL FIX: Force gs-item-content to stretch to full height of the grid item.
+     * Use position:absolute + inset:0 so height is determined by parent, not content.
+     */
+    .grid-stack-item { padding:0 !important; }
+    .grid-stack-item-content {
+      background:#FFF !important; border:none !important;
+      border-radius:12px !important;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04) !important;
+      /* Absolute fill so height is inherited from GridStack row calculation, not content */
+      position:absolute !important; inset:4px !important;
+      display:flex !important; flex-direction:column !important;
+      overflow:hidden !important;
+    }
+
+    .panel-header { height:34px; min-height:34px; display:flex; align-items:center;
+      padding:0 12px; border-bottom:1px solid #F3F4F6; font-size:11px; color:#6B7280;
+      font-weight:600; letter-spacing:.3px; user-select:none; flex-shrink:0; justify-content:space-between; }
+    .panel-header .left { display:flex; align-items:center; gap:6px; }
+    .panel-header .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .panel-header .actions { display:flex; align-items:center; gap:4px; }
+    .panel-header .lock-btn { cursor:pointer; padding:2px; border-radius:4px; color:#9CA3AF;
+      transition:all .15s; display:flex; align-items:center; }
+    .panel-header .lock-btn:hover { color:#DC2626; background:rgba(220,38,38,0.08); }
+    .panel-header .lock-btn.locked { color:#DC2626; background:rgba(220,38,38,0.08); }
+    .panel-header .maximize-btn { cursor:pointer; padding:2px; border-radius:4px; color:#9CA3AF;
+      transition:all .15s; display:flex; align-items:center; }
+    .panel-header .maximize-btn:hover { color:#2563EB; background:rgba(37,99,235,0.06); }
+
+    /*
+     * CRITICAL: .chart-box must fill remaining space after header.
+     * flex:1 + min-height:0 prevents height collapse in flex containers.
+     */
+    .chart-box { flex:1; width:100%; min-height:0; position:relative; }
+
+    /* Fullscreen overlay for maximized widget */
+    .widget-fullscreen {
+      position:fixed !important; inset:0 !important; z-index:200 !important;
+      width:100vw !important; height:100vh !important;
+      background:rgba(255,255,255,0.97) !important; backdrop-filter:blur(4px);
+      border-radius:0 !important; box-shadow:none !important;
+      display:flex !important; flex-direction:column !important;
+    }
+    .widget-fullscreen .panel-header { height:44px; min-height:44px; padding:0 20px; font-size:13px; }
+    .widget-fullscreen .chart-box { flex:1; min-height:0; }
+
+    /* ═══ Map widget ═══ */
+    .map-canvas { flex:1; min-height:0; position:relative; background:#FAFBFC; overflow:hidden; }
+    .map-grid { position:absolute; inset:0;
+      background-image: linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+      background-size:30px 30px; }
+    .cam-point { position:absolute; cursor:pointer; display:flex; flex-direction:column;
+      align-items:center; gap:3px; transition:all .2s; z-index:2; }
+    .cam-dot { width:14px; height:14px; border-radius:50%; border:2.5px solid #D1D5DB;
+      background:#fff; transition:all .25s; }
+    .cam-dot.active { border-color:#2563EB; background:#2563EB;
+      box-shadow:0 0 0 6px rgba(37,99,235,.15); animation:pulse 1.5s infinite; }
+    .cam-label { font-size:9px; color:#9CA3AF; white-space:nowrap; font-weight:500; }
+    .cam-label.active { color:#2563EB; font-weight:600; }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 0 6px rgba(37,99,235,.15)} 50%{box-shadow:0 0 0 12px rgba(37,99,235,.06)} }
+
+    /* ═══ Digital Twin ═══ */
+    .twin-canvas { flex:1; min-height:0; position:relative; overflow:hidden;
+      background:linear-gradient(180deg,#f8fafc,#eff6ff); }
+    .twin-floor { position:absolute; bottom:0; left:0; right:0; height:55%;
+      background: repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(37,99,235,.06) 39px,rgba(37,99,235,.06) 40px),
+                  repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(37,99,235,.06) 39px,rgba(37,99,235,.06) 40px);
+      transform:perspective(400px) rotateX(45deg); transform-origin:bottom center; }
+    .twin-drone { position:absolute; width:16px; height:16px; border-radius:50%;
+      background:#EF4444; border:3px solid #fff; box-shadow:0 0 12px rgba(239,68,68,.4);
+      transition:left .25s ease-out,top .25s ease-out; z-index:3; transform:translate(-50%,-50%); }
+    .twin-info { position:absolute; top:10px; left:12px; font-size:10px; color:#6B7280; z-index:3; line-height:1.6; }
+
+    /* ═══ Drawer ═══ */
+    .drawer-mask { position:fixed; inset:0; background:rgba(0,0,0,.15); z-index:100; }
+    .drawer-panel { position:fixed; top:0; right:0; bottom:0; width:280px; background:#fff;
+      box-shadow:-4px 0 24px rgba(0,0,0,.08); z-index:101; padding:20px;
+      display:flex; flex-direction:column; }
+
+    /* ═══ Demo toggle switch ═══ */
+    .toggle-track { width:36px; height:20px; border-radius:10px; cursor:pointer;
+      transition:background .2s; display:flex; align-items:center; padding:2px; flex-shrink:0; }
+    .toggle-track.on { background:#2563EB; }
+    .toggle-track.off { background:#D1D5DB; }
+    .toggle-knob { width:16px; height:16px; border-radius:50%; background:#fff;
+      box-shadow:0 1px 3px rgba(0,0,0,.15); transition:transform .2s; }
+    .toggle-track.on .toggle-knob { transform:translateX(16px); }
+
+    .data-value { font-size:14px; font-weight:700; font-family:'Inter',monospace; }
+    .data-label { font-size:9px; color:#9CA3AF; font-weight:500; letter-spacing:.5px; }
+
+    #portrait-overlay { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(15,23,42,0.85); color: #f8fafc; padding: 10px 24px; border-radius: 30px; backdrop-filter: blur(4px); pointer-events: none; font-size: 13px; font-weight: 500; letter-spacing: 1px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: fadeOutToast 4s forwards; }
+    @keyframes fadeOutToast { 0% { opacity:0; top:0; } 15% { opacity:1; top:20px; } 80% { opacity:1; top:20px; } 100% { opacity:0; top:-50px; visibility:hidden; } }
+    @media (max-width: 768px) and (orientation: portrait) { #portrait-overlay { display: block; } }
+    @media (max-width: 768px) {
+      .grid-stack-item { min-height: 400px !important; width: 100% !important; position: relative !important; margin-bottom: 16px !important; left: 0 !important; }
+      .grid-stack-item-content { position: absolute !important; inset: 4px !important; }
+      body, html, main { overflow-y: auto !important; touch-action: pan-y !important; -webkit-overflow-scrolling: touch; }
+    }
+    .grid-stack-item.locked .grid-stack-item-content {
+      cursor: default !important;
+    }
+  </style>
+</head>
+
+<body>
+<!-- ═══════════ PORTRAIT MODE OVERLAY ═══════════ -->
+<div id="portrait-overlay">建议横屏观看，以获得最佳战术视野</div>
+<div id="app" style="display:flex;flex-direction:column;min-height:100vh">
+
+  <!-- ═══════════ HEADER ═══════════ -->
+  <header class="bg-white flex items-center justify-between px-4 h-11 flex-shrink-0 z-50"
+          style="box-shadow:0 1px 3px rgba(0,0,0,.05)">
+    <div class="flex items-center gap-2">
+      <div class="w-6 h-6 rounded-md bg-[#2563EB] flex items-center justify-center">
+        <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+        </svg>
+      </div>
+      <span class="text-[#111827] font-bold tracking-wide text-[11px]">UAV TRACKING</span>
+    </div>
+
+    <!-- Center: location + camera -->
+    <div class="flex items-center gap-2">
+      <span class="text-[9px] text-gray-400 font-medium">地点</span>
+      <select v-model="currentLocation" @change="onLocationChange"
+        class="text-[11px] bg-[#F3F4F6] rounded-lg px-2.5 py-1 border-none outline-none text-[#111827] font-medium cursor-pointer">
+        <option v-for="loc in locationNames" :key="loc" :value="loc">{{ loc }}</option>
+      </select>
+
+      <span class="text-[9px] text-gray-400 font-medium ml-2">摄像头</span>
+      <div class="flex bg-[#F3F4F6] rounded-lg p-0.5">
+        <button v-for="cam in camerasForLocation" :key="cam"
+          @click="switchCamera(cam)"
+          :class="['px-2 py-0.5 text-[10px] font-medium rounded-md transition-all',
+            currentCamera===cam ? 'bg-white text-[#2563EB] shadow-sm' : 'text-gray-400 hover:text-gray-600']">
+          {{ cam }}
+        </button>
+      </div>
+    </div>
+
+    <div class="hidden md:flex items-center gap-2">
+      <div class="flex items-center gap-1.5 ml-3 pl-3 border-l border-gray-200">
+        <span class="text-[9px] font-medium" :class="demoMode?'text-[#2563EB]':'text-gray-400'">演示模式</span>
+        <div :class="['toggle-track', demoMode?'on':'off']" @click="toggleDemo">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5 ml-3 pl-3 border-l border-gray-200"><span class="text-[9px] font-medium" :class="isGlobalLocked?'text-red-500':'text-gray-400'">大屏锁定</span><div :class="['toggle-track', isGlobalLocked?'bg-red-500':'bg-gray-300']" @click="toggleGlobalLock"><div class="toggle-knob"></div></div></div>
+      <button @click="showDrawer=true"
+        class="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-gray-500 bg-[#F3F4F6] rounded-lg hover:text-[#2563EB] transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+        组件
+      </button>
+      <div class="flex items-center gap-1">
+        <span :class="['inline-block w-1.5 h-1.5 rounded-full', wsConnected?'bg-green-400':'bg-red-400']"></span>
+        <span :class="['text-[9px]', wsConnected?'text-green-600':'text-red-500']">{{wsConnected?'在线':'断开'}}</span>
+      </div>
+      <span class="text-[10px] text-gray-500 font-medium">{{username}}</span>
+      <select v-if="!isGuest" @change="switchAccount($event)" class="text-[9px] bg-[#F3F4F6] rounded px-1.5 py-0.5 border-none outline-none text-gray-500 cursor-pointer">
+        <option value="" disabled selected>切换账户</option>
+        <option value="admin">超级管理员</option>
+        <option value="region_admin">区域管理员A</option>
+      </select>
+      <a v-if="isAdmin" href="admin.html" class="text-[9px] text-gray-400 hover:text-[#2563EB]">管理</a>
+      <button v-if="isGuest" @click="showLoginModal=true"
+        class="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] transition-colors">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
+        登录
+      </button>
+      <button @click="logout" class="text-[9px] text-gray-400 hover:text-red-500">退出</button>
+    </div>
+    <button @click="showMobileMenu = !showMobileMenu" class="md:hidden text-gray-500 p-2">☰</button>
+  </header>
+
+  <div v-if="showMobileMenu" class="md:hidden absolute top-11 right-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 p-4 z-[200] flex flex-col gap-4">
+    <div class="flex items-center justify-between"><span class="text-xs font-medium" :class="isGlobalLocked?'text-red-500':'text-gray-600'">大屏锁定</span><div :class="['toggle-track', isGlobalLocked?'!bg-red-500':'bg-gray-300']" @click="toggleGlobalLock"><div class="toggle-knob"></div></div></div>
+    <div class="flex items-center justify-between"><span class="text-xs font-medium text-gray-600">演示模式</span><div :class="['toggle-track', demoMode?'on':'off']" @click="toggleDemo"><div class="toggle-knob"></div></div></div>
+    <div class="h-px bg-gray-100"></div>
+    <button @click="showDrawer=true; showMobileMenu=false" class="text-left text-xs font-medium text-blue-600">打开组件库</button>
+  </div>
+
+  <!-- ═══════════ GRIDSTACK ═══════════ -->
+  <main class="flex-1 overflow-y-auto overflow-x-hidden p-1.5" style="min-height:0">
+    <div class="grid-stack" id="grid-container" style="height:100%"></div>
+  </main>
+
+  <!-- ═══════════ FOOTER STATUS ═══════════ -->
+  <footer class="flex-shrink-0 h-9 flex items-center justify-around px-4 bg-white"
+          style="box-shadow:0 -1px 2px rgba(0,0,0,.04)">
+    <div><div class="data-label">摄像头</div><div class="data-value text-[#2563EB] !text-[11px]">{{currentCamera||'--'}}</div></div>
+    <div><div class="data-label">设备</div><div class="data-value text-[#111827] !text-[11px]">{{L.device_id||'--'}}</div></div>
+    <div><div class="data-label">距离</div><div class="data-value text-emerald-500 !text-[11px]">{{L.radar_dist!=null?L.radar_dist.toFixed(0)+' mm':'--'}}</div></div>
+    <div><div class="data-label">雷达XY</div><div class="data-value text-pink-500 !text-[11px]">{{L.radar_x_mm!=null?`(${L.radar_x_mm.toFixed(0)},${L.radar_y_mm.toFixed(0)})`:'--'}}</div></div>
+    <div><div class="data-label">Pan/Tilt</div><div class="data-value text-amber-500 !text-[11px]">{{L.gimbal_pan!=null?L.gimbal_pan.toFixed(1)+'°':'--'}} / {{L.gimbal_tilt!=null?L.gimbal_tilt.toFixed(1)+'°':'--'}}</div></div>
+    <div><div class="data-label">原始计数</div><div class="data-value text-sky-500 !text-[11px]">{{L.gimbal_pan_raw!=null?L.gimbal_pan_raw.toFixed(0):'--'}} / {{L.gimbal_tilt_raw!=null?L.gimbal_tilt_raw.toFixed(0):'--'}}</div></div>
+    <div><div class="data-label">像素坐标</div><div class="data-value text-violet-500 !text-[11px]">{{L.target_x!=null?`(${L.target_x.toFixed(0)},${L.target_y.toFixed(0)})`:'--'}}</div></div>
+    <div><div class="data-label">状态</div><div :class="['data-value !text-[11px]',L.status==='VISION_STATUS_LOCKED'?'text-green-500':(L.status==='VISION_STATUS_PREDICTED'?'text-amber-500':'text-red-500')]">{{L.status||'--'}}</div></div>
+    <div><div class="data-label">帧</div><div class="data-value text-gray-400 !text-[11px]">{{frameCount}}</div></div>
+    <div v-if="demoMode"><div class="data-label">模式</div><div class="data-value text-[#2563EB] !text-[11px]">DEMO</div></div>
+  </footer>
+
+  <!-- ═══════════ DRAWER ═══════════ -->
+  <div v-if="showDrawer" class="drawer-mask" @click="showDrawer=false"></div>
+  <transition name="slide">
+    <div v-if="showDrawer" class="drawer-panel">
+      <div class="flex items-center justify-between mb-5">
+        <span class="text-sm font-bold text-[#111827]">组件库</span>
+        <button @click="showDrawer=false" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="space-y-2 flex-1 overflow-y-auto">
+        <label v-for="w in allWidgets" :key="w.id"
+          class="flex items-center gap-3 px-3 py-2.5 bg-[#F9FAFB] rounded-xl cursor-pointer hover:bg-[#F3F4F6] transition-colors">
+          <input type="checkbox" :checked="widgetVisible[w.id]" @change="toggleWidget(w.id)"
+            class="w-4 h-4 rounded text-[#2563EB] border-gray-300" />
+          <div>
+            <div class="text-xs font-medium text-[#111827]">{{w.title}}</div>
+            <div class="text-[10px] text-gray-400">{{w.desc}}</div>
+          </div>
+        </label>
+      </div>
+      <button @click="resetLayout" class="mt-4 w-full py-2 text-xs font-medium text-gray-500 bg-[#F3F4F6] rounded-xl hover:bg-gray-200">
+        重置为默认布局
+      </button>
+    </div>
+  </transition>
+
+  <!-- ═══════════ LOGIN UPGRADE MODAL ═══════════ -->
+  <div v-if="showLoginModal" class="fixed inset-0 z-[300] flex items-center justify-center">
+    <div class="absolute inset-0 bg-black/50" @click="showLoginModal=false"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 mx-4" style="z-index:301">
+      <h3 class="text-base font-bold text-[#111827] mb-1">管理员权限认证</h3>
+      <p class="text-[11px] text-gray-400 mb-5">输入管理员凭据以升级当前会话权限</p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-medium text-gray-500 mb-1">用户名</label>
+          <input v-model="upgradeForm.username" placeholder="输入用户名" @keydown.enter="handleUpgrade"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/10 transition" />
+        </div>
+        <div>
+          <label class="block text-[11px] font-medium text-gray-500 mb-1">密码</label>
+          <input v-model="upgradeForm.password" type="password" placeholder="输入密码" @keydown.enter="handleUpgrade"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/10 transition" />
+        </div>
+        <p v-if="upgradeForm.error" class="text-[12px] text-red-500 font-medium">{{upgradeForm.error}}</p>
+        <div class="flex gap-2 pt-1">
+          <button @click="showLoginModal=false;upgradeForm.error=''"
+            class="flex-1 py-2 text-[12px] font-medium text-gray-500 bg-[#F3F4F6] rounded-lg hover:bg-gray-200 transition">取消</button>
+          <button @click="handleUpgrade"
+            class="flex-1 py-2 text-[12px] font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] transition">确认登录</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = '';
+const WS_URL   = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/dashboard`;
+const TOKEN    = localStorage.getItem('token');
+const TRAIL    = 80;
+const LK       = 'uav_layout_v4';
+const RADAR_RANGE_MM = 4000;
+const DIST_RANGE_MM = 4000;
+const TARGET_MIN_PX = 0;
+const TARGET_MAX_PX = 239;
+const TARGET_CENTER_PX = 120;
+const PAN_CENTER_DEG = 135;
+const TILT_CENTER_DEG = 90;
+const PAN_RAW_MAX = 4095;
+const TILT_RAW_MIN = 1080;
+const TILT_RAW_MAX = 2457;
+const TWIN_X_MIN_MM = -2500;
+const TWIN_X_MAX_MM = 2500;
+const TWIN_Y_MIN_MM = 0;
+const TWIN_Y_MAX_MM = 4000;
+const TWIN_Z_MIN_MM = -1500;
+const TWIN_Z_MAX_MM = 1500;
+
+if (!TOKEN) window.location.href = 'login.html';
+
+const { createApp, ref, reactive, onMounted, onBeforeUnmount, nextTick, watch, computed } = Vue;
+
+createApp({
+  setup() {
+    // ── Core state ──
+    const L = reactive({ device_id:null, radar_dist:null, radar_x_mm:null, radar_y_mm:null,
+      gimbal_pan:null, gimbal_tilt:null, gimbal_pan_raw:null, gimbal_tilt_raw:null,
+      target_x:null, target_y:null, status:null, camera_id:null, tracking_mode:null,
+      hover_active:null, feedforward_pan:null,
+      filtered_error:null, radar_vx:null, reported_at:null });
+    const wsConnected = ref(false);
+    const frameCount  = ref(0);
+    const DISPLAY_NAMES = { admin: '超级管理员', region_admin: '区域管理员A', guest: '访客' };
+    const rawUsername = localStorage.getItem('username') || 'operator';
+    const username = ref(DISPLAY_NAMES[rawUsername] || rawUsername);
+    const isGuest  = rawUsername === 'guest';
+    const isAdmin  = localStorage.getItem('role') === 'admin';
+
+    // ── Upgrade modal state ──
+    const showLoginModal = ref(false);
+    const upgradeForm = reactive({ username: '', password: '', error: '' });
+
+    async function handleUpgrade() {
+      upgradeForm.error = '';
+      if (!upgradeForm.username || !upgradeForm.password) { upgradeForm.error = '请输入用户名和密码'; return; }
+      try {
+        const r = await axios.post(`${API_BASE}/api/auth/login`, {
+          username: upgradeForm.username, password: upgradeForm.password
+        });
+        const d = r.data;
+        localStorage.setItem('token', d.access_token);
+        localStorage.setItem('role', d.role);
+        localStorage.setItem('username', upgradeForm.username);
+        localStorage.setItem('allowed_cameras', JSON.stringify(d.allowed_cameras));
+        showLoginModal.value = false;
+        window.location.reload();
+      } catch(e) {
+        upgradeForm.error = e.response?.data?.detail || '用户名或密码错误';
+      }
+    }
+
+    const switchAccounts = {
+      admin:        { password: 'admin123' },
+      region_admin: { password: 'admin123' },
+    };
+    async function switchAccount(evt) {
+      const name = evt.target.value;
+      const acct = switchAccounts[name];
+      if (!acct) return;
+      try {
+        const r = await axios.post(`${API_BASE}/api/auth/login`, { username: name, password: acct.password });
+        const d = r.data;
+        localStorage.setItem('token', d.access_token);
+        localStorage.setItem('role', d.role);
+        localStorage.setItem('username', name);
+        localStorage.setItem('allowed_cameras', JSON.stringify(d.allowed_cameras));
+        window.location.reload();
+      } catch(e) {
+        console.error('Switch account failed', e);
+      }
+    }
+
+    // Location & Camera
+    const assetTree = ref([]);
+    const locationNames = ref([]);
+    const currentLocation = ref('');
+    const currentCamera = ref('');
+    const showDrawer = ref(false);
+
+    // ── RBAC: allowed cameras from JWT ──
+    let allowedCameras = [];
+    try { allowedCameras = JSON.parse(localStorage.getItem('allowed_cameras') || '[]'); } catch { allowedCameras = []; }
+    const isFullAccess = isAdmin || !allowedCameras.length;
+
+    const camerasForLocation = computed(() => {
+      const loc = assetTree.value.find(l => l.name === currentLocation.value);
+      if (!loc) return [];
+      const all = loc.cameras.map(c => c.camera_name);
+      return isFullAccess ? all : all.filter(c => allowedCameras.includes(c));
+    });
+
+    function clampLocal(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function panDegToRaw(panDeg) {
+      return clampLocal((panDeg / 270) * PAN_RAW_MAX, 0, PAN_RAW_MAX);
+    }
+
+    function tiltDegToRaw(tiltDeg) {
+      return clampLocal(tiltDeg / 180 * (TILT_RAW_MAX - TILT_RAW_MIN) + TILT_RAW_MIN, TILT_RAW_MIN, TILT_RAW_MAX);
+    }
+
+    function radarAzimuthDeg(data) {
+      if (data.radar_x_mm != null && data.radar_y_mm != null && (data.radar_x_mm !== 0 || data.radar_y_mm !== 0)) {
+        return Math.atan2(data.radar_x_mm, Math.max(1, data.radar_y_mm)) * 180 / Math.PI;
+      }
+      return (data.gimbal_pan ?? PAN_CENTER_DEG) - PAN_CENTER_DEG;
+    }
+
+    async function loadAssetTree() {
+      try {
+        const r = await axios.get(`${API_BASE}/api/asset-tree`);
+        assetTree.value = r.data;
+        // RBAC: filter locations to only those with at least one allowed camera
+        if (isFullAccess) {
+          locationNames.value = r.data.map(l => l.name);
+        } else {
+          locationNames.value = r.data
+            .filter(l => l.cameras.some(c => allowedCameras.includes(c.camera_name)))
+            .map(l => l.name);
+        }
+        if (locationNames.value.length && !currentLocation.value) {
+          currentLocation.value = locationNames.value[0];
+          const loc = r.data.find(l => l.name === currentLocation.value);
+          if (loc && loc.cameras.length) {
+            const cams = isFullAccess ? loc.cameras : loc.cameras.filter(c => allowedCameras.includes(c.camera_name));
+            if (cams.length) currentCamera.value = cams[0].camera_name;
+          }
+          notifyWSLocation(currentLocation.value);
+        }
+      } catch(e) { locationNames.value = []; }
+    }
+
+    function onLocationChange() {
+      currentCamera.value = '';
+      clearCharts();
+      const loc = assetTree.value.find(l => l.name === currentLocation.value);
+      if (loc && loc.cameras.length) currentCamera.value = loc.cameras[0].camera_name;
+      notifyWSLocation(currentLocation.value);
+    }
+
+    function switchCamera(cam) {
+      if (cam === currentCamera.value) return;
+      currentCamera.value = cam;
+      clearCharts();
+    }
+
+    // ── Demo Mode — Unified Physics Model ──
+    const demoMode = ref(false);
+    let demoTimer = null;
+    const demoState = { tick: 0 };
+
+    function toggleDemo() {
+      demoMode.value = !demoMode.value;
+      if (demoMode.value) startDemo(); else stopDemo();
+    }
+
+    function startDemo() {
+      demoState.tick = 0;
+      clearCharts();
+      demoTimer = setInterval(demoTick, 100);
+    }
+
+    function stopDemo() {
+      if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+      clearCharts();
+    }
+
+    function demoTick() {
+      const t = demoState.tick++;
+      const T = t * 0.05;
+      const X3D = 900 * Math.sin(T * 1.1);
+      const Y3D = 2500 + 350 * Math.cos(T * 0.8);
+      const Z3D = 700 * Math.sin(T * 0.6) + 180 * Math.cos(T * 1.4);
+      const radarDist = Math.sqrt(X3D * X3D + Y3D * Y3D);
+      const panRelDeg = Math.atan2(X3D, Math.max(1, Y3D)) * 180 / Math.PI;
+      const tiltRelDeg = Math.atan2(Z3D, Math.max(1, radarDist)) * 180 / Math.PI;
+      const panDeg = PAN_CENTER_DEG + panRelDeg;
+      const tiltDeg = TILT_CENTER_DEG + tiltRelDeg;
+      const tx = clampLocal(TARGET_CENTER_PX + (panRelDeg / 32.5) * TARGET_CENTER_PX, TARGET_MIN_PX, TARGET_MAX_PX);
+      const ty = clampLocal(TARGET_CENTER_PX - (tiltRelDeg / 32.5) * TARGET_CENTER_PX, TARGET_MIN_PX, TARGET_MAX_PX);
+
+      const d = {
+        device_id:  'DEMO-DRONE',
+        location:   currentLocation.value || 'DEMO',
+        camera_id:  currentCamera.value || 'DEMO_CAM',
+        radar_dist: Math.round(radarDist),
+        radar_x_mm: Math.round(X3D),
+        radar_y_mm: Math.round(Y3D),
+        gimbal_pan: Math.round(panDeg * 100) / 100,
+        gimbal_tilt:Math.round(tiltDeg * 100) / 100,
+        gimbal_pan_raw: Math.round(panDegToRaw(panDeg)),
+        gimbal_tilt_raw: Math.round(tiltDegToRaw(tiltDeg)),
+        target_x:   Math.round(tx),
+        target_y:   Math.round(ty),
+        status:     t % 50 >= 45 ? 'VISION_STATUS_LOST' : 'VISION_STATUS_LOCKED',
+        tracking_mode: t % 50 >= 45 ? 'STATE_SEARCHING' : 'STATE_VISION_INNER_LOOP',
+        hover_active: (t % 50 < 45 && Math.abs(panRelDeg) < 5 && Math.abs(tiltRelDeg) < 5) ? 1 : 0,
+      };
+      feedData(d);
+    }
+
+    // ── Widget definitions ──
+    const allWidgets = [
+      { id:'map',    title:'阵地地图',   desc:'摄像头分布 · 全局控制', color:'#2563EB' },
+      { id:'twin',   title:'3D 数字孪生', desc:'ECharts-GL · Lerp 插值', color:'#8B5CF6' },
+      { id:'radar',  title:'雷达俯视图', desc:'极坐标扫描',           color:'#2563EB' },
+      { id:'target', title:'视觉瞄准镜', desc:'像素坐标 · 锁定框',    color:'#EF4444' },
+      { id:'dist',   title:'雷达-目标绝对直线距离', desc:'雷达距离时序', color:'#10B981' },
+    ];
+
+    const widgetVisible = reactive({});
+    const lockedWidgets = reactive({});
+    const showMobileMenu = ref(false);
+    allWidgets.forEach(w => widgetVisible[w.id] = true);
+    allWidgets.forEach(w => lockedWidgets[w.id] = false);
+    const isGlobalLocked = computed(() => allWidgets.every(w => lockedWidgets[w.id]));
+
+    const DEFAULT_LAYOUT = [
+      { id:'map',    x:0, y:0, w:5, h:7 },
+      { id:'twin',   x:5, y:0, w:4, h:4 },
+      { id:'radar',  x:9, y:0, w:3, h:4 },
+      { id:'target', x:5, y:4, w:4, h:3 },
+      { id:'dist',   x:9, y:4, w:3, h:3 },
+    ];
+
+    let grid = null;
+    let radarChart=null, targetChart=null, distChart=null, twinChart=null;
+    const radarTrail=[], targetTrail=[], distHistory=[], twin3DTrail=[];
+
+    // ── Lerp interpolation state for 3D twin ──
+    const lerpState = {
+      current: { x:0, y:0, z:0, pan:0, tilt:0 },
+      target:  { x:0, y:0, z:0, pan:0, tilt:0 },
+      active: false,
+      selected: false,
+      color: '#EF4444',
+    };
+    const LERP_RATE = 0.10;
+    let lerpRAF = null;
+
+    // Track which widget is maximized
+    const maximizedWidget = ref(null);
+
+    // ── Layout persistence ──
+    function saveLayout() {
+      if (!grid) return;
+      const items = grid.getGridItems().map(el => {
+        const n = el.gridstackNode;
+        return { id:n.id, x:n.x, y:n.y, w:n.w, h:n.h };
+      });
+      localStorage.setItem(LK, JSON.stringify({ items, visible:{...widgetVisible}, locked:{...lockedWidgets} }));
+    }
+
+    function loadLayout() {
+      try { const r=localStorage.getItem(LK); return r?JSON.parse(r):null; } catch{ return null; }
+    }
+
+    function resetLayout() {
+      localStorage.removeItem(LK);
+      allWidgets.forEach(w => { widgetVisible[w.id]=true; lockedWidgets[w.id]=false; });
+      rebuildGrid(); showDrawer.value=false;
+    }
+
+    // ── Maximize / Restore ──
+    function toggleMaximize(widgetId) {
+      if (maximizedWidget.value === widgetId) {
+        // Restore
+        maximizedWidget.value = null;
+        const el = document.querySelector(`[gs-id="${widgetId}"] > .grid-stack-item-content`);
+        if (el) el.classList.remove('widget-fullscreen');
+      } else {
+        // Maximize
+        if (maximizedWidget.value) {
+          const prev = document.querySelector(`[gs-id="${maximizedWidget.value}"] > .grid-stack-item-content`);
+          if (prev) prev.classList.remove('widget-fullscreen');
+        }
+        maximizedWidget.value = widgetId;
+        const el = document.querySelector(`[gs-id="${widgetId}"] > .grid-stack-item-content`);
+        if (el) el.classList.add('widget-fullscreen');
+      }
+      setTimeout(resizeAllCharts, 50);
+    }
+
+    // ── Build widget HTML ──
+    function widgetHtml(id) {
+      const w = allWidgets.find(x => x.id===id);
+      const color = w?w.color:'#6B7280', title = w?w.title:id;
+      const isLck = lockedWidgets[id];
+      const lockColor = isLck ? '#EF4444' : '#9CA3AF';
+      const lockPath = isLck ? 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' : 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z';
+      const lockBtn = `<span class="maximize-btn lock-btn-wrap" onclick="window.__toggleLock('${id}')" style="color:${lockColor}; margin-right: 4px;"><svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path class="lock-icon-path" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${lockPath}"/></svg></span>`;
+      const maxBtn = `<span class="maximize-btn" onclick="window.__toggleMax('${id}')">
+        <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+      </span>`;
+      const hdr = `<div class="panel-header"><span class="left"><span class="dot" style="background:${color}"></span>${title}</span><div style="display:flex">${lockBtn}${maxBtn}</div></div>`;
+
+      if (id==='map') return hdr + `<div id="widget-map" class="map-canvas"><div class="map-grid"></div></div>`;
+      if (id==='twin') return hdr + `<div id="chart-twin" class="chart-box"></div><div id="twin-hud" style="display:none;position:absolute;top:44px;left:12px;background:rgba(15,23,42,0.85);border:1px solid #3B82F6;color:#fff;padding:8px 12px;border-radius:6px;font-size:11px;z-index:10;pointer-events:none;"></div>`;
+      return hdr + `<div id="chart-${id}" class="chart-box"></div>`;
+    }
+
+    // Expose maximize to global for onclick
+    window.__toggleMax = function(id) { toggleMaximize(id); };
+
+    function updateGridLocks() {
+      if (!grid) return;
+      grid.getGridItems().forEach(el => {
+        const id = el.gridstackNode?.id || el.getAttribute('gs-id');
+        if (id && lockedWidgets[id] !== undefined) {
+          grid.update(el, { noMove: lockedWidgets[id], noResize: lockedWidgets[id], locked: lockedWidgets[id] });
+          const pathEl = el.querySelector(`.lock-icon-path`);
+          const btnEl = el.querySelector(`.lock-btn-wrap`);
+          if (pathEl && btnEl) {
+            pathEl.setAttribute('d', lockedWidgets[id] ? 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' : 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z');
+            btnEl.style.color = lockedWidgets[id] ? '#EF4444' : '#9CA3AF';
+          }
+        }
+      });
+      saveLayout();
+    }
+
+    function toggleGlobalLock() {
+      const targetState = !isGlobalLocked.value;
+      allWidgets.forEach(w => { lockedWidgets[w.id] = targetState; });
+      updateGridLocks();
+    }
+    window.__toggleLock = function(id) {
+      lockedWidgets[id] = !lockedWidgets[id];
+      updateGridLocks();
+    };
+
+    // ── GridStack rebuild ──
+    function rebuildGrid() {
+      stopLerpLoop();
+      [radarChart, targetChart, distChart, twinChart].forEach(c => { if(c) try{c.dispose()}catch(e){} });
+      radarChart=null; targetChart=null; distChart=null; twinChart=null;
+
+      const container = document.getElementById('grid-container');
+      if (grid) { try{grid.destroy(false)}catch(e){} }
+      container.innerHTML = '';
+
+      grid = GridStack.init({
+        column:12, cellHeight:80, margin:5,
+        float:true, animate:true,
+        oneColumnMode:true, oneColumnModeDomSort:true,
+      }, container);
+
+      const saved = loadLayout();
+      let layout;
+      if (saved) {
+        layout = saved.items.filter(i => saved.visible[i.id]!==false);
+        Object.keys(saved.visible).forEach(k => widgetVisible[k]=saved.visible[k]);
+        if (saved.locked) { Object.assign(lockedWidgets, saved.locked); }
+      } else {
+        layout = DEFAULT_LAYOUT.filter(i => widgetVisible[i.id]);
+      }
+
+      grid.load(layout.map(l => ({
+        id:l.id, x:l.x, y:l.y, w:l.w, h:l.h,
+        noMove: !!lockedWidgets[l.id], noResize: !!lockedWidgets[l.id], locked: !!lockedWidgets[l.id],
+        content:widgetHtml(l.id)
+      })));
+      grid.on('change', saveLayout);
+      grid.on('resizestop', () => setTimeout(resizeAllCharts, 60));
+      layout.forEach(l => {
+        const el = document.querySelector(`[gs-id="${l.id}"]`);
+        if (el) el.classList.toggle('locked', !!lockedWidgets[l.id]);
+      });
+      updateGridLocks();
+
+      nextTick(() => {
+        initCharts();
+        renderMapCameras();
+        observeResizes();
+      });
+    }
+
+    function toggleWidget(id) { widgetVisible[id]=!widgetVisible[id]; rebuildGrid(); }
+
+    // ── Map cameras ──
+    const CAM_POS = {
+      'CAM_NORTH_01':  { label:'北·NORTH_01',  px:.35, py:.2 },
+      'CAM_SOUTH_02':  { label:'南·SOUTH_02',  px:.65, py:.8 },
+      'CAM_CENTER_03': { label:'中·CENTER_03', px:.5, py:.5 },
+      'CAM_CITY_01':   { label:'CITY_01',      px:.5, py:.5 },
+      'CAM_WILD_01':   { label:'WILD_01',      px:.5, py:.5 },
+    };
+
+    function renderMapCameras() {
+      const el = document.getElementById('widget-map');
+      if (!el) return;
+      el.querySelectorAll('.cam-point,.map-loc,.map-compass').forEach(e => e.remove());
+
+      // Only show cameras the user has access to (RBAC)
+      camerasForLocation.value.forEach(cam => {
+        const pos = CAM_POS[cam] || { label:cam, px:.5, py:.5 };
+        const pt = document.createElement('div');
+        pt.className = 'cam-point';
+        pt.style.cssText = `left:${pos.px*100}%;top:${pos.py*100}%;transform:translate(-50%,-50%)`;
+        const active = currentCamera.value === cam;
+        pt.innerHTML = `<div class="cam-dot ${active?'active':''}"></div><span class="cam-label ${active?'active':''}">${pos.label}</span>`;
+        pt.addEventListener('click', () => switchCamera(cam));
+        el.appendChild(pt);
+      });
+
+      const lbl = document.createElement('div');
+      lbl.className = 'map-loc';
+      lbl.style.cssText = 'position:absolute;top:8px;left:12px;font-size:10px;color:#6B7280;font-weight:600;z-index:3';
+      lbl.textContent = currentLocation.value||'';
+      el.appendChild(lbl);
+
+      const cp = document.createElement('div');
+      cp.className = 'map-compass';
+      cp.style.cssText = 'position:absolute;top:8px;right:12px;font-size:9px;color:#D1D5DB;font-weight:700;z-index:3';
+      cp.textContent = 'N ↑';
+      el.appendChild(cp);
+    }
+
+    // ── ECharts ──
+    function initCharts() {
+      const rd = document.getElementById('chart-radar');
+      if (rd) { radarChart = echarts.init(rd); radarChart.setOption(radarOpt()); }
+      const td = document.getElementById('chart-target');
+      if (td) { targetChart = echarts.init(td); targetChart.setOption(targetOpt()); }
+      const dd = document.getElementById('chart-dist');
+      if (dd) { distChart = echarts.init(dd); distChart.setOption(distOpt()); }
+      const tw = document.getElementById('chart-twin');
+      if (tw) {
+        twinChart = echarts.init(tw);
+        twinChart.setOption(twinOpt());
+        twinChart.on('click', (params) => { if (params.seriesName === '无人机' || params.seriesName === '原点') { lerpState.selected = !lerpState.selected; } });
+        startLerpLoop();
+      }
+    }
+
+    function resizeAllCharts() {
+      [radarChart, targetChart, distChart, twinChart].forEach(c => { if(c) try{c.resize()}catch(e){} });
+    }
+
+    function observeResizes() {
+      const ro = new ResizeObserver(() => setTimeout(resizeAllCharts, 40));
+      ['chart-radar','chart-target','chart-dist','chart-twin','widget-map'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) ro.observe(el);
+      });
+    }
+
+    function radarOpt() {
+      return {
+        backgroundColor:'transparent', polar:{radius:'76%'},
+        angleAxis:{type:'value',min:-180,max:180,startAngle:90,splitNumber:12,
+          axisLine:{lineStyle:{color:'#E5E7EB'}},splitLine:{lineStyle:{color:'#F3F4F6'}},
+          axisLabel:{color:'#9CA3AF',fontSize:8,formatter:'{value}°'}},
+        radiusAxis:{type:'value',min:0,max:RADAR_RANGE_MM,
+          axisLine:{lineStyle:{color:'#E5E7EB'}},splitLine:{lineStyle:{color:'#F3F4F6'}},
+          axisLabel:{color:'#9CA3AF',fontSize:7,formatter:v=>Math.round(v)+' mm'}},
+        series:[
+          {name:'轨迹',type:'line',coordinateSystem:'polar',data:[],
+            lineStyle:{color:'rgba(37,99,235,.3)',width:1.5},symbol:'none',smooth:true},
+          {name:'当前',type:'effectScatter',coordinateSystem:'polar',data:[],symbolSize:12,
+            rippleEffect:{brushType:'stroke',scale:3},
+            itemStyle:{color:'#ff4d4f',shadowColor:'rgba(255,77,79,.5)',shadowBlur:10}},
+        ],
+      };
+    }
+
+    function targetOpt() {
+      return {
+        backgroundColor:'transparent',
+        grid:{left:36,right:12,top:12,bottom:26},
+        xAxis:{min:TARGET_MIN_PX,max:TARGET_MAX_PX,axisLine:{lineStyle:{color:'#E5E7EB'}},splitLine:{lineStyle:{color:'#F9FAFB'}},axisLabel:{color:'#9CA3AF',fontSize:7}},
+        yAxis:{min:TARGET_MIN_PX,max:TARGET_MAX_PX,inverse:true,axisLine:{lineStyle:{color:'#E5E7EB'}},splitLine:{lineStyle:{color:'#F9FAFB'}},axisLabel:{color:'#9CA3AF',fontSize:7}},
+        series:[
+          {type:'line',data:[[TARGET_MIN_PX,TARGET_CENTER_PX],[TARGET_MAX_PX,TARGET_CENTER_PX]],symbol:'none',lineStyle:{color:'#D1D5DB',width:1,type:'dashed'},silent:true},
+          {type:'line',data:[[TARGET_CENTER_PX,TARGET_MIN_PX],[TARGET_CENTER_PX,TARGET_MAX_PX]],symbol:'none',lineStyle:{color:'#D1D5DB',width:1,type:'dashed'},silent:true},
+          {name:'轨迹',type:'line',data:[],lineStyle:{color:'rgba(239,68,68,.2)',width:1.5},symbol:'none',smooth:true},
+          {name:'目标',type:'scatter',data:[],symbolSize:12,symbol:'rect',
+            itemStyle:{color:'#EF4444',borderColor:'#EF4444',borderWidth:2,shadowColor:'rgba(239,68,68,.3)',shadowBlur:6}},
+        ],
+      };
+    }
+
+    function distOpt() {
+      return {
+        backgroundColor:'transparent',
+        title:{text:'雷达-目标绝对距离 (mm)',left:'center',top:0,textStyle:{fontSize:10,color:'#9CA3AF',fontWeight:500}},
+        grid:{left:42,right:12,top:20,bottom:22},
+        xAxis:{type:'category',data:[],axisLine:{lineStyle:{color:'#E5E7EB'}},axisLabel:{show:false},splitLine:{show:false}},
+        yAxis:{type:'value',min:0,max:DIST_RANGE_MM,axisLine:{lineStyle:{color:'#E5E7EB'}},splitLine:{lineStyle:{color:'#F3F4F6'}},
+          axisLabel:{color:'#9CA3AF',fontSize:7,formatter:v=>Math.round(v)+' mm'}},
+        series:[{type:'line',data:[],smooth:true,symbol:'none',lineStyle:{color:'#10B981',width:2},
+          areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,
+            colorStops:[{offset:0,color:'rgba(16,185,129,.12)'},{offset:1,color:'rgba(16,185,129,0)'}]}}}],
+      };
+    }
+
+    // ── ECharts-GL 3D Digital Twin ──
+    function twinOpt() {
+      return {
+        backgroundColor: 'transparent',
+        tooltip: { show: false },
+        xAxis3D: { type:'value', name:'X (mm)', min:TWIN_X_MIN_MM, max:TWIN_X_MAX_MM,
+          axisLine:{lineStyle:{color:'#D1D5DB'}}, axisLabel:{ show: true, color:'#9CA3AF', fontSize:8 },
+          splitLine:{lineStyle:{color:'#F3F4F6'}} },
+        yAxis3D: { type:'value', name:'Depth Y (mm)', min:TWIN_Y_MIN_MM, max:TWIN_Y_MAX_MM,
+          axisLine:{lineStyle:{color:'#D1D5DB'}}, axisLabel:{ show: true, color:'#9CA3AF', fontSize:8 },
+          splitLine:{lineStyle:{color:'#F3F4F6'}} },
+        zAxis3D: { type:'value', name:'Z (mm)', min:TWIN_Z_MIN_MM, max:TWIN_Z_MAX_MM,
+          axisLine:{lineStyle:{color:'#D1D5DB'}}, axisLabel:{ show: true, color:'#9CA3AF', fontSize:8 },
+          splitLine:{lineStyle:{color:'#F3F4F6'}} },
+        grid3D: {
+          viewControl: { autoRotate:false, distance:220, alpha:25, beta:40 },
+          light: {
+            main: { intensity:1.2, shadow:false },
+            ambient: { intensity:0.4 }
+          },
+          boxWidth:120, boxDepth:120, boxHeight:60,
+          environment: 'none',
+        },
+        series: [
+          { name:'无人机', type:'scatter3D', coordinateSystem:'cartesian3D', data:[], symbolSize:14,
+            itemStyle:{ color:'#EF4444', opacity:0.95, borderWidth:1, borderColor:'#fff' },
+            emphasis:{ itemStyle:{ color:'#DC2626' } } },
+          { name:'尾迹', type:'lines3D', coordinateSystem:'cartesian3D', data:[], lineStyle:{ color:'rgba(139,92,246,0.35)', width:2, opacity:0.6 },
+            effect:{ show:false } },
+          { name:'视线', type:'lines3D', coordinateSystem:'cartesian3D', data:[], lineStyle:{ color:'rgba(37,99,235,0.5)', width:2, type:'dashed' } },
+          { name:'原点', type:'scatter3D', coordinateSystem:'cartesian3D', data:[[0,0,0]], symbolSize:10,
+            itemStyle:{ color:'#2563EB', opacity:0.8 } },
+          { name:'预判', type:'lines3D', coordinateSystem:'cartesian3D', data:[],
+            lineStyle:{ color:'#F59E0B', width:3, opacity:0.9 } },
+        ],
+      };
+    }
+
+    // Convert telemetry to 3D coordinates using radar XY and tilt relative to horizon.
+    function toCartesian3D(data) {
+      const panRelRad = (((data.gimbal_pan ?? PAN_CENTER_DEG) - PAN_CENTER_DEG) * Math.PI) / 180;
+      const tiltRelRad = (((data.gimbal_tilt ?? TILT_CENTER_DEG) - TILT_CENTER_DEG) * Math.PI) / 180;
+      const horizontalDist = Math.max(1, data.radar_dist || 0);
+      const x = (data.radar_x_mm != null && (data.radar_x_mm !== 0 || data.radar_y_mm !== 0))
+        ? data.radar_x_mm
+        : horizontalDist * Math.sin(panRelRad);
+      const y = (data.radar_y_mm != null && data.radar_y_mm > 0)
+        ? data.radar_y_mm
+        : horizontalDist * Math.cos(panRelRad);
+      const planarDist = Math.max(1, Math.sqrt(x * x + y * y));
+      const z = planarDist * Math.tan(tiltRelRad);
+      return { x, y, z };
+    }
+
+    function startLerpLoop() {
+      if (lerpRAF) return;
+      let prevPos = null;
+      function tick() {
+        lerpRAF = requestAnimationFrame(tick);
+        if (!lerpState.active || !twinChart) return;
+
+        const c = lerpState.current, t = lerpState.target;
+        c.x    += (t.x    - c.x)    * LERP_RATE;
+        c.y    += (t.y    - c.y)    * LERP_RATE;
+        c.z    += (t.z    - c.z)    * LERP_RATE;
+        c.pan  += (t.pan  - c.pan)  * LERP_RATE;
+        c.tilt += (t.tilt - c.tilt) * LERP_RATE;
+
+        const curPt = [c.x, c.y, c.z];
+
+        // Capped trail (50 points)
+        twin3DTrail.push(curPt.slice());
+        if (twin3DTrail.length > 50) twin3DTrail.shift();
+
+        // Build trail line segments
+        const trailLines = [];
+        for (let i = 1; i < twin3DTrail.length; i++) {
+          trailLines.push({ coords: [twin3DTrail[i-1], twin3DTrail[i]] });
+        }
+
+        // LOS ray from origin to current position
+        const losLine = [{ coords: [[0,0,0], curPt] }];
+
+        // Direction prediction arrow
+        const arrowData = [];
+        if (prevPos) {
+          const dx = c.x - prevPos[0], dy = c.y - prevPos[1], dz = c.z - prevPos[2];
+          const mag = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (mag > 0.5) {
+            const scale = 2000 / mag;
+            arrowData.push({ coords: [curPt, [c.x + dx*scale, c.y + dy*scale, c.z + dz*scale]] });
+          }
+        }
+        prevPos = curPt.slice();
+
+        // Series-only update — no grid3D / axis to avoid full redraw flicker
+        twinChart.setOption({
+          series: [
+            { data: [curPt], itemStyle:{ color: lerpState.color } },
+            { data: trailLines },
+            { data: losLine },
+            { data: [[0,0,0]] },
+            { data: arrowData },
+          ]
+        });
+
+        const hud = document.getElementById('twin-hud');
+        if (hud) {
+          if (lerpState.selected) {
+            hud.style.display = 'block';
+            hud.innerHTML = `<div style="color:#3B82F6;font-weight:bold;margin-bottom:6px;">实时三维坐标</div><div style="display:grid;grid-template-columns:40px 1fr;gap:4px;"><span style="color:#9CA3AF">X</span><span style="text-align:right">${c.x.toFixed(0)} mm</span><span style="color:#9CA3AF">Y</span><span style="text-align:right">${c.y.toFixed(0)} mm</span><span style="color:#9CA3AF">Z</span><span style="text-align:right">${c.z.toFixed(0)} mm</span><span style="color:#9CA3AF">Pan</span><span style="text-align:right">${L.gimbal_pan != null ? L.gimbal_pan.toFixed(1) + '°' : '--'}</span><span style="color:#9CA3AF">Tilt</span><span style="text-align:right">${L.gimbal_tilt != null ? L.gimbal_tilt.toFixed(1) + '°' : '--'}</span><span style="color:#9CA3AF">Raw</span><span style="text-align:right">${L.gimbal_pan_raw != null ? L.gimbal_pan_raw.toFixed(0) : '--'} / ${L.gimbal_tilt_raw != null ? L.gimbal_tilt_raw.toFixed(0) : '--'}</span></div>`;
+          } else { hud.style.display = 'none'; }
+        }
+      }
+      tick();
+    }
+
+    function stopLerpLoop() {
+      if (lerpRAF) { cancelAnimationFrame(lerpRAF); lerpRAF = null; }
+    }
+
+    // ── Update 3D Twin Lerp target ──
+    function updateTwin(d) {
+      if (!twinChart) return;
+      const pos = toCartesian3D(d);
+      lerpState.target.x    = clampLocal(pos.x, TWIN_X_MIN_MM, TWIN_X_MAX_MM);
+      lerpState.target.y    = clampLocal(pos.y, TWIN_Y_MIN_MM, TWIN_Y_MAX_MM);
+      lerpState.target.z    = clampLocal(pos.z, TWIN_Z_MIN_MM, TWIN_Z_MAX_MM);
+      lerpState.target.pan  = d.gimbal_pan ?? PAN_CENTER_DEG;
+      lerpState.target.tilt = d.gimbal_tilt ?? TILT_CENTER_DEG;
+      lerpState.active = true;
+      lerpState.color = d.status === 'VISION_STATUS_LOCKED' ? '#EF4444' : '#F59E0B';
+    }
+
+    // ── Unified data feed (used by both WS and Demo) ──
+    function feedData(d) {
+      // Filter by camera
+      if (d.camera_id !== currentCamera.value) return;
+
+      Object.assign(L, d);
+      frameCount.value++;
+
+      const radarAngle = radarAzimuthDeg(d);
+      radarTrail.push([d.radar_dist, radarAngle]);
+      if (radarTrail.length > TRAIL) radarTrail.shift();
+      if (radarChart) radarChart.setOption({ series:[{data:[...radarTrail]},{data:[[d.radar_dist, radarAngle]]}] });
+
+      targetTrail.push([d.target_x, d.target_y]);
+      if (targetTrail.length > TRAIL) targetTrail.shift();
+      if (targetChart) {
+        const c = d.status==='VISION_STATUS_LOCKED' ? '#10B981' : (d.status==='VISION_STATUS_PREDICTED' ? '#F59E0B' : '#EF4444');
+        targetChart.setOption({ series:[{},{},{data:[...targetTrail]},{data:[[d.target_x,d.target_y]],itemStyle:{color:c,borderColor:c,shadowColor:c+'40'}}] });
+      }
+
+      const now = new Date().toLocaleTimeString();
+      distHistory.push({t:now,v:d.radar_dist});
+      if (distHistory.length > 120) distHistory.shift();
+      if (distChart) distChart.setOption({ xAxis:{data:distHistory.map(h=>h.t)}, series:[{data:distHistory.map(h=>h.v)}] });
+
+      updateTwin(d);
+    }
+
+    function clearCharts() {
+      radarTrail.length=0; targetTrail.length=0; distHistory.length=0; twin3DTrail.length=0;
+      frameCount.value=0;
+      lerpState.active = false;
+      lerpState.current.x=0; lerpState.current.y=0; lerpState.current.z=0;
+      lerpState.current.pan=0; lerpState.current.tilt=0;
+      lerpState.target.x=0; lerpState.target.y=0; lerpState.target.z=0;
+      lerpState.target.pan=0; lerpState.target.tilt=0;
+      Object.assign(L,{device_id:null,radar_dist:null,radar_x_mm:null,radar_y_mm:null,gimbal_pan:null,gimbal_tilt:null,gimbal_pan_raw:null,gimbal_tilt_raw:null,target_x:null,target_y:null,status:null,camera_id:null,tracking_mode:null,hover_active:null,feedforward_pan:null,filtered_error:null,radar_vx:null,reported_at:null});
+      if(radarChart) radarChart.setOption({series:[{data:[]},{data:[]}]});
+      if(targetChart) targetChart.setOption({series:[{},{},{data:[]},{data:[]}]});
+      if(distChart) distChart.setOption({xAxis:{data:[]},series:[{data:[]}]});
+      if(twinChart) twinChart.setOption({series:[{data:[]},{data:[]},{data:[]},{data:[[0,0,0]]},{data:[]}]});
+      renderMapCameras();
+    }
+
+    // ── WebSocket ──
+    let ws=null, rAttempts=0, rTimer=null;
+    function notifyWSLocation(loc) { if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify({action:'switch_location',location:loc})); }
+
+    function connectWS() {
+      if(rTimer){clearTimeout(rTimer);rTimer=null;}
+      ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(TOKEN)}`);
+      ws.onopen = () => { wsConnected.value=true; rAttempts=0; if(currentLocation.value) notifyWSLocation(currentLocation.value); };
+      ws.onmessage = (ev) => {
+        if (demoMode.value) return; // ignore real data in demo mode
+        try { const msg=JSON.parse(ev.data); if(msg.type==='realtime'&&msg.data) feedData(msg.data); } catch(e){}
+      };
+      ws.onclose = (ev) => { wsConnected.value=false; if(ev.code===4001){alert('认证已失效');logout();return;} scheduleReconnect(); };
+      ws.onerror = () => wsConnected.value=false;
+    }
+    function scheduleReconnect(){ rTimer=setTimeout(connectWS, Math.min(2000*Math.pow(2,rAttempts),30000)); rAttempts++; }
+
+    function logout() {
+      ['token','role','username','allowed_cameras'].forEach(k=>localStorage.removeItem(k));
+      if(ws)ws.close(); window.location.href='login.html';
+    }
+
+    onMounted(async () => {
+      await loadAssetTree();
+      rebuildGrid();
+      connectWS();
+    });
+    onBeforeUnmount(() => {
+      if(ws)ws.close(); if(rTimer)clearTimeout(rTimer); if(demoTimer)clearInterval(demoTimer);
+      stopLerpLoop();
+      [radarChart,targetChart,distChart,twinChart].forEach(c=>{if(c)try{c.dispose()}catch(e){}});
+    });
+
+    watch(currentCamera, renderMapCameras);
+    watch(camerasForLocation, renderMapCameras);
+
+    return {
+      L,wsConnected,frameCount,username,isAdmin,isGuest,
+      locationNames,currentLocation,onLocationChange,
+      currentCamera,camerasForLocation,switchCamera,
+      demoMode,toggleDemo,
+      isGlobalLocked,toggleGlobalLock,
+      showMobileMenu,
+      showDrawer,allWidgets,widgetVisible,toggleWidget,resetLayout,
+      maximizedWidget,
+      switchAccount,
+      showLoginModal,upgradeForm,handleUpgrade,
+      logout,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>

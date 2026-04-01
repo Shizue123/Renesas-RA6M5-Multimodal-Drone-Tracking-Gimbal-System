@@ -1,0 +1,26 @@
+# Python cache and local environments
+**/__pycache__/
+*.py[cod]
+.venv/
+
+# Local runtime data
+drone_tracking.db
+Drone_Tracking_WebCloud/drone_tracking.db
+
+# RA6M5 generated build artifacts
+Drone_Tracking_RA6M5/Debug/**/*.o
+Drone_Tracking_RA6M5/Debug/**/*.d
+Drone_Tracking_RA6M5/Debug/**/*.o.in
+Drone_Tracking_RA6M5/Debug/**/*.check.in
+Drone_Tracking_RA6M5/Debug/*.elf
+Drone_Tracking_RA6M5/Debug/*.map
+Drone_Tracking_RA6M5/Debug/*.rpd
+Drone_Tracking_RA6M5/Debug/*.sbd
+Drone_Tracking_RA6M5/Debug/*.srec
+
+# One-off local cleanup helpers
+.tmp_pdf_extract.py
+apply_refactor.py
+fix_esp32_timestamp.py
+fix_webcloud.py
+temp_code.txt

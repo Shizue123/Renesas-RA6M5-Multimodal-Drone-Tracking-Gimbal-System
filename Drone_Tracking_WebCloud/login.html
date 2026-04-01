@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAV Tracking — 登录</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body{ margin:0; font-family:'Inter','Segoe UI','Microsoft YaHei',sans-serif; background:#F3F4F6; min-height:100vh; }
+    .login-split { display:flex; min-height:100vh; }
+    .login-left { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center;
+      background: linear-gradient(135deg,#EFF6FF 0%,#DBEAFE 50%,#C7D2FE 100%); padding:2rem; }
+    .login-right { flex:1; display:flex; justify-content:center; align-items:center; padding:2rem; }
+    .card { background:#fff; border-radius:16px; box-shadow:0 4px 24px rgba(0,0,0,.06); padding:40px; width:100%; max-width:380px; }
+    input { width:100%; border:1.5px solid #E5E7EB; border-radius:10px; padding:10px 14px; outline:none;
+      font-size:13px; transition:border .2s; font-family:inherit; }
+    input:focus { border-color:#2563EB; box-shadow:0 0 0 3px rgba(37,99,235,.08); }
+    button { width:100%; padding:11px; border:none; border-radius:10px; background:#2563EB; color:#fff;
+      font-weight:600; font-size:13px; cursor:pointer; transition:background .2s; font-family:inherit; }
+    button:hover { background:#1D4ED8; }
+    .radar-ring { width:160px; height:160px; border-radius:50%; position:relative; margin-bottom:2rem;
+      background: radial-gradient(circle, rgba(37,99,235,.06) 0%, rgba(37,99,235,.02) 60%, transparent 70%); }
+    .radar-ring::before { content:''; position:absolute; inset:15px; border-radius:50%;
+      border:1.5px solid rgba(37,99,235,.15); }
+    .radar-ring::after { content:''; position:absolute; inset:40px; border-radius:50%;
+      border:1.5px solid rgba(37,99,235,.10); }
+    .radar-dot { position:absolute; width:10px; height:10px; border-radius:50%;
+      background:#2563EB; top:30%; left:55%; box-shadow:0 0 12px rgba(37,99,235,.4);
+      animation: floatDot 4s ease-in-out infinite; }
+    @keyframes floatDot { 0%,100%{transform:translate(0,0)} 25%{transform:translate(15px,-10px)} 50%{transform:translate(-8px,20px)} 75%{transform:translate(12px,8px)} }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="login-split">
+    <!-- Left Branding -->
+    <div class="login-left">
+      <div class="radar-ring"><div class="radar-dot"></div></div>
+      <h1 class="text-2xl font-bold text-[#111827] mb-2">低空无人机追踪系统</h1>
+      <p class="text-sm text-gray-500 text-center max-w-xs leading-relaxed">
+        多摄像头实时监控 · 雷达联动追踪 · 数字孪生态势感知
+      </p>
+    </div>
+
+    <!-- Right Form -->
+    <div class="login-right">
+      <div class="card">
+        <div class="flex items-center gap-2 mb-6">
+          <div class="w-8 h-8 rounded-lg bg-[#2563EB] flex items-center justify-center">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-[#111827]">UAV TRACKING</div>
+            <div class="text-[10px] text-gray-400">Multi‑Camera Drone Surveillance</div>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1.5">用户名</label>
+            <div style="position:relative">
+              <input v-model="username" placeholder="输入用户名" @keydown.enter="doLogin"
+                @focus="showHistory = historyAccounts.length > 0"
+                @blur="setTimeout(() => showHistory = false, 150)" autocomplete="off" />
+              <div v-if="showHistory && historyAccounts.length" style="position:absolute;top:100%;left:0;right:0;z-index:10;
+                background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;margin-top:4px;overflow:hidden;
+                box-shadow:0 4px 16px rgba(0,0,0,.08)">
+                <div v-for="acc in historyAccounts" :key="acc" @mousedown.prevent="pickAccount(acc)"
+                  style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;cursor:pointer;
+                    font-size:13px;color:#374151;transition:background .15s"
+                  onmouseover="this.style.background='#F3F4F6'" onmouseout="this.style.background='transparent'">
+                  <span style="display:flex;align-items:center;gap:6px">
+                    <svg width="14" height="14" fill="none" stroke="#9CA3AF" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    {{acc}}
+                  </span>
+                  <span @mousedown.prevent.stop="removeAccount(acc, $event)" style="color:#D1D5DB;font-size:11px;cursor:pointer;padding:2px 4px;border-radius:4px"
+                    onmouseover="this.style.color='#EF4444'" onmouseout="this.style.color='#D1D5DB'">✕</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1.5">密码</label>
+            <input v-model="password" type="password" placeholder="输入密码" @keydown.enter="doLogin" />
+          </div>
+          <p v-if="error" class="text-xs text-red-500">{{error}}</p>
+          <button @click="doLogin" :disabled="loading">
+            {{loading ? '登录中…' : '登 录'}}
+          </button>
+          <div class="text-center mt-3">
+            <a href="#" @click.prevent="guestLogin" class="text-[11px] text-gray-400 hover:text-[#2563EB] transition-colors"
+              style="text-decoration:none">👉 以访客身份免密登录</a>
+          </div>
+        </div>
+
+        <p class="text-center text-[10px] text-gray-300 mt-6">v3.0 · 强管控 · Camera-Level RBAC</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+const { createApp, ref } = Vue;
+
+createApp({
+  setup(){
+    const username = ref('');
+    const password = ref('');
+    const error    = ref('');
+    const loading  = ref(false);
+
+    // ── 历史账号记忆 ──
+    const HISTORY_KEY = 'uav_login_history';
+    const historyAccounts = ref([]);
+    const showHistory = ref(false);
+
+    function loadHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        historyAccounts.value = raw ? JSON.parse(raw) : [];
+      } catch { historyAccounts.value = []; }
+    }
+
+    function saveHistory(name) {
+      let list = historyAccounts.value.filter(n => n !== name);
+      list.unshift(name);
+      if (list.length > 5) list = list.slice(0, 5);
+      historyAccounts.value = list;
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+    }
+
+    function pickAccount(name) {
+      username.value = name;
+      showHistory.value = false;
+    }
+
+    function removeAccount(name, ev) {
+      ev.stopPropagation();
+      historyAccounts.value = historyAccounts.value.filter(n => n !== name);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(historyAccounts.value));
+    }
+
+    loadHistory();
+
+    async function doLogin(){
+      error.value = '';
+      if(!username.value||!password.value){ error.value='请输入用户名和密码'; return; }
+      loading.value = true;
+      try {
+        const r = await axios.post(`${API}/api/auth/login`, {
+          username: username.value, password: password.value
+        });
+        const d = r.data;
+        localStorage.setItem('token', d.access_token);
+        localStorage.setItem('role', d.role);
+        localStorage.setItem('username', username.value);
+        localStorage.setItem('allowed_cameras', JSON.stringify(d.allowed_cameras));
+        saveHistory(username.value);
+        window.location.href = 'dashboard.html';
+      } catch(e) {
+        console.error('登录异常详情:', e.response || e);
+        error.value = e.response?.data?.detail || '登录失败，请检查用户名和密码';
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    async function guestLogin() {
+      try {
+        const r = await axios.post(`${API}/api/auth/login`, {
+          username: 'guest', password: 'guest123'
+        });
+        const d = r.data;
+        localStorage.setItem('token', d.access_token);
+        localStorage.setItem('role', d.role);
+        localStorage.setItem('username', 'guest');
+        localStorage.setItem('allowed_cameras', JSON.stringify(d.allowed_cameras));
+        window.location.href = 'dashboard.html';
+      } catch(e) {
+        console.error('访客登录异常详情:', e.response || e);
+        error.value = e.response?.data?.detail || '访客登录失败';
+      }
+    }
+
+    return { username, password, error, loading, doLogin, guestLogin,
+             historyAccounts, showHistory, pickAccount, removeAccount };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
