@@ -1,5 +1,7 @@
 # 无人机多模态追踪云台系统
 
+[![English Badge](https://img.shields.io/badge/Language-English-blue?style=for-the-badge)](https://github.com/Shizue123/Renesas-RA6M5-Multimodal-Drone-Tracking-Gimbal-System/tree/En)
+
 基于 **雷达 + 视觉** 双传感器融合的无人机实时追踪云台，覆盖从嵌入式控制到云端看板的完整链路。
 
 ---
